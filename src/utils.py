@@ -162,8 +162,6 @@ def mrank(y, y_pre):
     r_index = np.array(np.where(r_label == 1)) + 1
     reci_sum = np.sum(1 / r_index)
     reci_rank = np.mean(1 / r_index)
-    print('reci_rank:', reci_rank)
-    # np.save('/content/drive/My Drive/Colab Notebooks/idse/result/r_index', r_index)
     return reci_sum
 
 

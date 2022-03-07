@@ -27,7 +27,7 @@ parser.add_argument('--sparse', action='store_true', default=False, help='GAT wi
 parser.add_argument('--seed', type=int, default=10, help='Random seed.')
 parser.add_argument('--epochs', type=int, default=2000, help='Number of epochs to train.')
 parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
-parser.add_argument('--weight_decay', type=float, default=1e-2, help='Weight decay (L2 loss on parameters).')
+parser.add_argument('--weight_decay', type=float, default=5e-3, help='Weight decay (L2 loss on parameters).')
 parser.add_argument('--hidden', type=int, default=1024, help='Number of hidden units.')
 parser.add_argument('--nb_heads', type=int, default=10, help='Number of head attentions.')
 parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
@@ -87,6 +87,7 @@ prec_arr = []
 recall_arr = []
 ap_arr = []
 mr_arr = []
+valid_aupr_arr = []
 
 
 for train_index, test_index in kf.split(data_set, data_set):
@@ -191,6 +192,7 @@ for train_index, test_index in kf.split(data_set, data_set):
           'test_f1: {:.4f}'.format(f1),
           'test_ap: {:.4f}'.format(ap),
           'test_mr: {:.4f}'.format(mr))
+    valid_aupr_arr.append(best_pr)
     auc_arr.append(test_auc)
     aupr_arr.append(test_aupr)
     mcc_arr.append(mcc)
@@ -199,6 +201,7 @@ for train_index, test_index in kf.split(data_set, data_set):
     recall_arr.append(recall)
     ap_arr.append(ap)
     mr_arr.append(mr)
+    np.savetxt(args.result_path + 'valid_aupr_avg', [counter, np.mean(np.array(valid_aupr_arr))])
     np.savetxt(args.result_path + 'auc_avg', [counter, np.mean(np.array(auc_arr))])
     np.savetxt(args.result_path + 'aupr_avg', [counter, np.mean(np.array(aupr_arr))])
     np.savetxt(args.result_path + 'mcc_avg', [counter, np.mean(np.array(mcc_arr))])
@@ -207,6 +210,7 @@ for train_index, test_index in kf.split(data_set, data_set):
     np.savetxt(args.result_path + 'recall_avg', [counter, np.mean(np.array(recall_arr))])
     np.savetxt(args.result_path + 'ap_avg', [counter, np.mean(np.array(ap_arr))])
     np.savetxt(args.result_path + 'mr_avg', [counter, np.mean(np.array(mr_arr))])
+    np.savetxt(args.result_path + 'valid_aupr', np.array(valid_aupr_arr))
     np.savetxt(args.result_path + 'auc', np.array(auc_arr))
     np.savetxt(args.result_path + 'aupr', np.array(aupr_arr))
     np.savetxt(args.result_path + 'mcc', np.array(mcc_arr))
