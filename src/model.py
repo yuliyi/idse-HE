@@ -2,11 +2,8 @@
 # -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
 import numpy as np
 from itertools import *
-from sklearn import preprocessing
 
 
 class HetAgg(nn.Module):
@@ -43,6 +40,7 @@ class HetAgg(nn.Module):
         se_feature = nn.Parameter(torch.Tensor(self.S_n, self.embed_d))
         se_feature.data.normal_(0, 0.1)
 
+        self.softmax = nn.Softmax(dim=1)
         self.act = nn.LeakyReLU(args.alpha)
 
         self.drug_feature = mpnn_feature
@@ -55,7 +53,6 @@ class HetAgg(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                # nn.init.kaiming_normal_(m.weight.data, nonlinearity='relu')
                 nn.init.normal_(m.weight.data, std=0.1)
 
 

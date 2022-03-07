@@ -8,7 +8,7 @@ import torch.utils.data as data
 import sys
 import binascii
 import pywt
-from sklearn.metrics import roc_auc_score, matthews_corrcoef, recall_score, precision_score, precision_recall_curve, roc_curve, auc, f1_score
+from sklearn.metrics import roc_auc_score, matthews_corrcoef, recall_score, precision_score, precision_recall_curve, roc_curve, auc, f1_score, average_precision_score
 from sklearn import preprocessing
 from sklearn.decomposition import TruncatedSVD, NMF
 from scipy import sparse
@@ -20,6 +20,12 @@ def row_normalize(a_matrix):
     new_matrix = a_matrix / row_sums[:, np.newaxis]
     new_matrix[np.isnan(new_matrix) | np.isinf(new_matrix)] = 0.0
     return new_matrix
+    
+    
+def standardization(data):
+    mu = np.mean(data, axis=1, keepdims=True)
+    sigma = np.std(data, axis=1, keepdims=True)
+    return (data - mu) / sigma
     
     
 def dse_normalize(cuda, drug_se, D_n=1020, S_n=5599):
@@ -62,7 +68,7 @@ def load_data(path="/content/drive/My Drive/Colab Notebooks/idse/data/", mpnn = 
         fpt_feature[index] = hex_arr
         index += 1
     fpt_feature = torch.FloatTensor(fpt_feature)#.normal_(0, 0.1)
-    mpnn_feature = torch.FloatTensor(np.load(path + mpnn)).normal_(0, 0.1)
+    mpnn_feature = torch.FloatTensor(row_normalize(np.load(path + mpnn)))#.normal_(0, 0.1)
     return fpt_feature, mpnn_feature
 
 
@@ -137,6 +143,8 @@ def validation(y_pre, y, flag=False):
     fpr, tpr, threshold = roc_curve(y, y_pre)
     roc_auc = auc(fpr, tpr)
     if flag:
+        ap = average_precision_score(y, y_pre)
+        mr = mrank(y, y_pre)
         y_predict_class = y_pre
         y_predict_class[y_predict_class > 0.5] = 1
         y_predict_class[y_predict_class <= 0.5] = 0
@@ -144,8 +152,19 @@ def validation(y_pre, y, flag=False):
         recall = recall_score(y, y_predict_class)
         mcc = matthews_corrcoef(y, y_predict_class)
         f1 = f1_score(y, y_predict_class)
-        return roc_auc, pr_auc, prec, recall, mcc, f1
-    return roc_auc, pr_auc, _, _, _, _
+        return roc_auc, pr_auc, prec, recall, mcc, f1, ap, mr
+    return roc_auc, pr_auc, _, _, _, _, _, _
+    
+    
+def mrank(y, y_pre):
+    index = np.argsort(-y_pre)
+    r_label = y[index]
+    r_index = np.array(np.where(r_label == 1)) + 1
+    reci_sum = np.sum(1 / r_index)
+    reci_rank = np.mean(1 / r_index)
+    print('reci_rank:', reci_rank)
+    # np.save('/content/drive/My Drive/Colab Notebooks/idse/result/r_index', r_index)
+    return reci_sum
 
 
 def normalize_adj(mx):

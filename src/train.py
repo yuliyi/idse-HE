@@ -1,17 +1,13 @@
 from __future__ import division
 from __future__ import print_function
 
-import os
-import glob
 import time
 import random
 import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-from torch.autograd import Variable
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from utils import load_data, get_links, dse_normalize, validation, binary_cross_entropy_loss, save_result, save_all
 from model import HetAgg
@@ -26,14 +22,17 @@ parser.add_argument('--model_path', type=str, default='/content/drive/My Drive/C
 parser.add_argument('--D_n', type=int, default=1020, help='number of drug node')
 parser.add_argument('--S_n', type=int, default=5599, help='number of side-effect node')
 parser.add_argument('--no_cuda', action='store_true', default=False, help='Disables CUDA training.')
+parser.add_argument('--fastmode', action='store_true', default=False, help='Validate during training pass.')
+parser.add_argument('--sparse', action='store_true', default=False, help='GAT with sparse version or not.')
 parser.add_argument('--seed', type=int, default=10, help='Random seed.')
 parser.add_argument('--epochs', type=int, default=2000, help='Number of epochs to train.')
 parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
-parser.add_argument('--weight_decay', type=float, default=5e-3, help='Weight decay (L2 loss on parameters).')
+parser.add_argument('--weight_decay', type=float, default=1e-2, help='Weight decay (L2 loss on parameters).')
 parser.add_argument('--hidden', type=int, default=1024, help='Number of hidden units.')
+parser.add_argument('--nb_heads', type=int, default=10, help='Number of head attentions.')
 parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--alpha', type=float, default=0.02, help='Alpha for the leaky_relu.')
-parser.add_argument('--patience', type=int, default=300, help='Patience')
+parser.add_argument('--patience', type=int, default=500, help='Patience')
 
 args = parser.parse_args()
 print("------arguments-------")
@@ -67,19 +66,17 @@ def train(model, optimizer, mask, target, train_idx, train_set):
     optimizer.step()
     output = output[train_idx]
     noutput = torch.sigmoid(output).cpu().detach().numpy()
-    train_auc, train_aupr, _, _, _, _ = validation(noutput, train_set)
-    return loss_train.data.item(), train_auc, train_aupr, outputs
+    metrics = validation(noutput, train_set)
+    return loss_train.data.item(), metrics[0], metrics[1], outputs
 
 
 def compute_test(test_set, outputs, mask, test_idx, flag=False):
     output = torch.flatten(torch.mul(mask, outputs))[test_idx]
     noutput = torch.sigmoid(output).cpu().detach().numpy()
-    test_auc, test_aupr, prec, recall, mcc, f1 = validation(noutput, test_set, flag)
-    return test_auc, test_aupr, prec, recall, mcc, f1
+    metrics = validation(noutput, test_set, flag)
+    return metrics
 
 
-count = 5710980
-pos_count = 133750
 kf = StratifiedKFold(n_splits=10, shuffle=True)
 counter = 1
 auc_arr = []
@@ -88,13 +85,11 @@ mcc_arr = []
 f1_arr = []
 prec_arr = []
 recall_arr = []
-seed = np.random.randint(0, 1000, 10)
+ap_arr = []
+mr_arr = []
 
 
 for train_index, test_index in kf.split(data_set, data_set):
-    if counter != 6:
-        counter += 1
-        continue
     train_index, valid_index = train_test_split(train_index, test_size=0.05)
     train_set = data_set[train_index]
     valid_set = data_set[valid_index]
@@ -130,13 +125,10 @@ for train_index, test_index in kf.split(data_set, data_set):
     model = HetAgg(args, args.dropout, mpnn_feature, fpt_feature, drug_se_train, se_drug_train)
     model.init_weights()
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    # optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9)
     model.cuda()
     # Train model
     t_total = time.time()
-    loss_values = []
     bad_counter = 0
-    best = 1000000
     best_epoch = 0
     best_pr = 0
     final_outputs = []
@@ -155,9 +147,10 @@ for train_index, test_index in kf.split(data_set, data_set):
           'train_aupr: {:.4f}'.format(train_aupr),
           'time: {:.4f}s'.format(time.time() - t),
           'lr:', optimizer.defaults['lr'])
-        # loss_values.append(loss)
-        valid_auc, valid_aupr, _, _, _, _ = compute_test(valid_set, outputs, valid_mask, valid_index)
-        test_auc, test_aupr, _, _, _, _ = compute_test(test_set, outputs, test_mask, test_index)
+        valid_metrics = compute_test(valid_set, outputs, valid_mask, valid_index)
+        valid_auc, valid_aupr = valid_metrics[0], valid_metrics[1]
+        test_metrics = compute_test(test_set, outputs, test_mask, test_index)
+        test_auc, test_aupr = test_metrics[0], test_metrics[1]
         print("Valid set results:",
               "folder= {}".format(counter),
               'Epoch: {:04d}'.format(epoch+1),
@@ -185,7 +178,9 @@ for train_index, test_index in kf.split(data_set, data_set):
     print('Loading {}th epoch'.format(best_epoch))
 
     # Testing
-    test_auc, test_aupr, prec, recall, mcc, f1 = compute_test(test_set, final_outputs, test_mask, test_index, True)
+    # save_result(final_outputs, data_set, test_mask, counter)
+    save_all(final_outputs, test_mask, counter)
+    test_auc, test_aupr, prec, recall, mcc, f1, ap, mr = compute_test(test_set, final_outputs, test_mask, test_index, True)
     print("Test set results:",
           "folder= {}".format(counter),
           'test_auc: {:.4f}'.format(test_auc),
@@ -193,23 +188,31 @@ for train_index, test_index in kf.split(data_set, data_set):
           'test_prec: {:.4f}'.format(prec),
           'test_recall: {:.4f}'.format(recall),
           'test_mcc: {:.4f}'.format(mcc),
-          'test_f1: {:.4f}'.format(f1))
+          'test_f1: {:.4f}'.format(f1),
+          'test_ap: {:.4f}'.format(ap),
+          'test_mr: {:.4f}'.format(mr))
     auc_arr.append(test_auc)
     aupr_arr.append(test_aupr)
     mcc_arr.append(mcc)
     f1_arr.append(f1)
     prec_arr.append(prec)
     recall_arr.append(recall)
+    ap_arr.append(ap)
+    mr_arr.append(mr)
     np.savetxt(args.result_path + 'auc_avg', [counter, np.mean(np.array(auc_arr))])
     np.savetxt(args.result_path + 'aupr_avg', [counter, np.mean(np.array(aupr_arr))])
     np.savetxt(args.result_path + 'mcc_avg', [counter, np.mean(np.array(mcc_arr))])
     np.savetxt(args.result_path + 'f1_avg', [counter, np.mean(np.array(f1_arr))])
     np.savetxt(args.result_path + 'prec_avg', [counter, np.mean(np.array(prec_arr))])
     np.savetxt(args.result_path + 'recall_avg', [counter, np.mean(np.array(recall_arr))])
+    np.savetxt(args.result_path + 'ap_avg', [counter, np.mean(np.array(ap_arr))])
+    np.savetxt(args.result_path + 'mr_avg', [counter, np.mean(np.array(mr_arr))])
     np.savetxt(args.result_path + 'auc', np.array(auc_arr))
     np.savetxt(args.result_path + 'aupr', np.array(aupr_arr))
     np.savetxt(args.result_path + 'mcc', np.array(mcc_arr))
     np.savetxt(args.result_path + 'f1', np.array(f1_arr))
     np.savetxt(args.result_path + 'prec', np.array(prec_arr))
     np.savetxt(args.result_path + 'recall', np.array(recall_arr))
+    np.savetxt(args.result_path + 'ap', np.array(ap_arr))
+    np.savetxt(args.result_path + 'mr', np.array(mr_arr))
     counter += 1
