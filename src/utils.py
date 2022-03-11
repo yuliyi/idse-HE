@@ -67,8 +67,8 @@ def load_data(path="/content/drive/My Drive/Colab Notebooks/idse/data/", mpnn = 
             hex_arr = wavelet_encoder(line)
         fpt_feature[index] = hex_arr
         index += 1
-    fpt_feature = torch.FloatTensor(fpt_feature)#.normal_(0, 0.1)
-    mpnn_feature = torch.FloatTensor(row_normalize(np.load(path + mpnn)))#.normal_(0, 0.1)
+    fpt_feature = torch.FloatTensor(fpt_feature)
+    mpnn_feature = torch.FloatTensor(row_normalize(np.load(path + mpnn)))
     return fpt_feature, mpnn_feature
 
 
